@@ -99,17 +99,15 @@ func (f *File) Lookup(names ...string) (string, error) {
 		switch vv := v.(type) {
 		case string:
 			return "", &IsStringError{
-				FilePath: f.Path,
 				NamePath: names[:i],
 				String:   vv}
 		case NamesValuesList:
-			sublist, ok := vv[names[i]]
+			valForName, ok := vv[names[i]]
 			if !ok {
 				return "", &UnknownNameError{
-					FilePath: f.Path,
 					NamePath: names[:i]}
 			}
-			v = sublist
+			v = valForName
 		default:
 			panic(fmt.Sprintf("%s = %+#v",
 				filePaths(f.Path, names[:i], true), v))
@@ -120,7 +118,6 @@ func (f *File) Lookup(names ...string) (string, error) {
 		return vv, nil
 	case NamesValuesList:
 		return "", &NotStringError{
-			FilePath: f.Path,
 			NamePath: names,
 			NVL:      vv}
 	default:
@@ -129,19 +126,6 @@ func (f *File) Lookup(names ...string) (string, error) {
 }
 
 /*================================== Errors ==================================*/
-
-var verboseErrorStrings = false
-
-// ReportErrorsVerbosely() controls whether e.Error() reports the full path of
-// the problematic VDF file or just its basename, for any (pointer to an)
-// IsStringError, NotStringError or UnknowNameError.
-//
-// It also controls whether NotStringError.Error() lists the subkeys of the
-// NamesValuesList found where a string was expected.
-//
-func ReportErrorsVerbosely(setting bool) {
-	verboseErrorStrings = setting
-}
 
 func filePaths(filespec string, names []string, fullFilePath bool) string {
 	if !fullFilePath {
@@ -155,46 +139,47 @@ func filePaths(filespec string, names []string, fullFilePath bool) string {
 }
 
 type IsStringError struct {
-	FilePath string
 	NamePath []string
 	String   string
 }
 type NotStringError struct {
-	FilePath string
 	NamePath []string
 	NVL      NamesValuesList
 }
 type UnknownNameError struct {
-	FilePath string
 	NamePath []string
 }
 
 func (e *IsStringError) Error() string {
-	lastName, prevNames := splitNamePath(e.NamePath)
-	return fmt.Sprintf("key %q has value %q, not a NVL, in %s",
-		lastName, e.String, filePaths(e.FilePath, prevNames, verboseErrorStrings))
+	return fmt.Sprintf("key %s has value %q, not a NVL",
+		namesPath(e.NamePath), e.String)
 }
 func (e *NotStringError) Error() string {
-	lastName, prevNames := splitNamePath(e.NamePath)
-	t := fmt.Sprintf("key %q is NVL, not string, in %s",
-		lastName, filePaths(e.FilePath, prevNames, verboseErrorStrings))
-	if verboseErrorStrings {
-		p := "\n\t(subkeys are"
-		for n, _ := range e.NVL {
-			t += p + fmt.Sprintf(" %q", n)
-			p = ","
+	text := "{}"
+	if len(e.NVL) > 0 {
+		for k, v := range e.NVL {
+			text = fmt.Sprintf("{%q %q", k, v)
+			break
 		}
+		if len(e.NVL) > 1 {
+			text += " ..."
+		}
+		text += "}"
 	}
-	return t
+	return fmt.Sprintf("key %s has NVL %s, not a string",
+		namesPath(e.NamePath), text)
 }
 func (e *UnknownNameError) Error() string {
-	lastName, prevNames := splitNamePath(e.NamePath)
-	return fmt.Sprintf("unknown name %q in %s",
-		lastName, filePaths(e.FilePath, prevNames, verboseErrorStrings))
+	last := len(e.NamePath) - 1
+	return fmt.Sprintf("unknown name %q at %s",
+		e.NamePath[last], namesPath(e.NamePath[:last]))
 }
-func splitNamePath(names []string) (string, []string) {
-	last := len(names) - 1
-	return names[last], names[:last]
+func namesPath(names []string) string {
+	text := ""
+	for _, n := range names {
+		text += fmt.Sprintf("→%q", n)
+	}
+	return text[1:]
 }
 
 type CannotError struct {
