@@ -93,9 +93,11 @@ func FromFile(filespec string) (*File, error) {
 // value.)
 //
 func (f *File) Lookup(names ...string) (string, error) {
+	if len(names) == 0 {
+		panic("sVDF.File.Lookup(): no names!")
+	}
 	v := f.TopValue
-	iLastName := len(names) - 1
-	for i := 0; i < iLastName; i++ {
+	for i := 0; i < len(names); i++ {
 		switch vv := v.(type) {
 		case string:
 			return "", &IsStringError{
@@ -120,6 +122,38 @@ func (f *File) Lookup(names ...string) (string, error) {
 		return "", &NotStringError{
 			NamePath: names,
 			NVL:      vv}
+	default:
+		panic(fmt.Sprintf("%s = %+#v", filePaths(f.Path, names, true), v))
+	}
+}
+
+// HaveString(names) reports whether Lookup(names) would succeed.
+//
+func (f *File) HaveString(names ...string) bool {
+	if len(names) == 0 {
+		panic("sVDF.File.HaveString(): no names!")
+	}
+	v := f.TopValue
+	for i := 0; i < len(names); i++ {
+		switch vv := v.(type) {
+		case string:
+			return false
+		case NamesValuesList:
+			valForName, ok := vv[names[i]]
+			if !ok {
+				return false
+			}
+			v = valForName
+		default:
+			panic(fmt.Sprintf("%s = %+#v",
+				filePaths(f.Path, names[:i], true), v))
+		}
+	}
+	switch v.(type) {
+	case string:
+		return true
+	case NamesValuesList:
+		return false
 	default:
 		panic(fmt.Sprintf("%s = %+#v", filePaths(f.Path, names, true), v))
 	}
@@ -166,8 +200,8 @@ func (e *NotStringError) Error() string {
 		}
 		text += "}"
 	}
-	return fmt.Sprintf("key %s has NVL %s, not a string",
-		namesPath(e.NamePath), text)
+	return fmt.Sprintf("key %s has NVL %#.64v, not a string",
+		namesPath(e.NamePath), e.NVL)
 }
 func (e *UnknownNameError) Error() string {
 	last := len(e.NamePath) - 1
@@ -179,7 +213,7 @@ func namesPath(names []string) string {
 	for _, n := range names {
 		text += fmt.Sprintf("→%q", n)
 	}
-	return text[1:]
+	return text[len("→"):]
 }
 
 type CannotError struct {
@@ -190,6 +224,9 @@ type CannotError struct {
 }
 
 func cannot(baseErr error, verb, filespec string) error {
+	if pe, isPathErr := baseErr.(*os.PathError); isPathErr {
+		baseErr = pe.Unwrap()
+	}
 	return &CannotError{
 		Verb:      verb,
 		Noun:      filespec,
