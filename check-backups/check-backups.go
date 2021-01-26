@@ -5,11 +5,14 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	// "github.com/c12h/errs" //???TO-DO: better name coming one day ...
 	"github.com/c12h/steam-stuff/steamfiles"
 	"github.com/docopt/docopt-go"
 )
+
+type AppNum = steamfiles.AppNum
 
 const (
 	defaultAppsLibDir = "/Store/X/LinuxGames/Steam/SteamApps/steamapps/"
@@ -30,7 +33,7 @@ const (
 
 /*=================================== CLI ====================================*/
 
-const VERSION = "0.1"
+const VERSION = "0.3"
 
 const USAGEf = `Usage:
   %s [options]
@@ -43,7 +46,6 @@ Options:
                     [default: %s]
   -b=<backups-dir>  Specify the directory to search for backups
                     [default: %s]
-  -d                Output lots of information
   -r                Report backups with no appmanifest_<app#>.acf in <lib-dir>
   -v                Output progress reports
 `
@@ -69,11 +71,9 @@ func main() {
 	steamAppsLibDir := filepath.Clean(getArg("-a", parsedArgs))
 	steamBackupsDir := filepath.Clean(getArg("-b", parsedArgs))
 	reportBackupsNotInLib := optSpecified("-r", parsedArgs)
-	debugging := optSpecified("-d", parsedArgs)
 	verbose := optSpecified("-v", parsedArgs)
 
-	check(steamAppsLibDir, steamBackupsDir,
-		reportBackupsNotInLib, verbose, debugging)
+	check(steamAppsLibDir, steamBackupsDir, reportBackupsNotInLib, verbose)
 }
 
 func optSpecified(key string, parsedArgs docopt.Opts) bool {
@@ -96,61 +96,48 @@ func getArg(key string, parsedArgs docopt.Opts) string {
 /*============================== Main function ===============================*/
 //
 
-func handleDupeBackup(prev, cur *steamfiles.AppInfo) bool {
-	fmt.Fprintf(os.Stderr,
-		" Found multiple backups for app %d (%q):\n"+
-			"\tUsing    %q,\n\tIgnoring %q\n",
-		cur.Number, cur.Name, cur.DirName, prev.DirName)
-	return true // Use cur, discard prev
-}
+var manifestInfoForAppNum steamfiles.InstalledAppForAppNum
 
-func check(steamAppsLibDir, steamBackupsDir string,
-	reportUninstalled, verbose, debugging bool,
-) {
-	manifestInfoForAppNum := make(steamfiles.AppInfoForAppNum)
-	err :=
-		steamfiles.ScanSteamLibDir(steamAppsLibDir, manifestInfoForAppNum)
+func check(steamAppsLibDir, steamBackupsDir string, reportUninstalled, verbose bool) {
+	manifestInfoForAppNum = make(steamfiles.InstalledAppForAppNum)
+	err := steamfiles.ScanSteamLibDir(
+		steamAppsLibDir, manifestInfoForAppNum, reportOldManifest)
 	DieIf(err, "")
 	if verbose {
 		reportCount(len(manifestInfoForAppNum), "valid appmanifest_$N.acf file")
 	}
-	if debugging { //D//?
-		dumpMap("Info from manifests:", manifestInfoForAppNum)
-	}
 
-	backupInfoForAppNum := make(steamfiles.AppInfoForAppNum)
+	backupInfoForAppNum := make(steamfiles.AppBackupForAppNum)
 	err = steamfiles.ScanBackupsDir(
 		steamBackupsDir, backupInfoForAppNum, handleDupeBackup)
 	DieIf(err, "")
 	if verbose {
 		reportCount(len(backupInfoForAppNum), "Steam backup")
 	}
-	if debugging {
-		dumpMap("Info from backups:", backupInfoForAppNum)
-	}
 
-	for mAppId, mInfo := range manifestInfoForAppNum {
-		bInfo, ok := backupInfoForAppNum[mAppId]
+	for mAppNum, mInfo := range manifestInfoForAppNum {
+		bInfo, ok := backupInfoForAppNum[mAppNum]
 		if !ok {
-			recordProblem(noBackup, mInfo.Name, mAppId)
+			recordProblem(noBackup, mInfo.AppName, mInfo.AppNumber)
 		} else {
 			// ???TO-DO: compare mInfo.Name to bInfo.Name
 
 			if mInfo.ModTime.After(bInfo.ModTime) {
 				newer, err := steamfiles.AppNewerThan(
-					steamAppsLibDir, mInfo.DirName, bInfo.ModTime)
+					mInfo.LibraryFolders[0], mInfo.InstallDir,
+					bInfo.ModTime)
 				WarnIf(err, "")
 				if newer {
-					recordProblem(oldBackup, mInfo.Name, mAppId)
+					recordProblem(oldBackup, mInfo.AppName, mAppNum)
 				}
 			}
 		}
 	}
 
 	if reportUninstalled {
-		for bAppId, bInfo := range backupInfoForAppNum {
-			if _, ok := manifestInfoForAppNum[bAppId]; !ok {
-				recordProblem(notInstalled, bInfo.Name, bAppId)
+		for bAppNum, bInfo := range backupInfoForAppNum {
+			if _, ok := manifestInfoForAppNum[bAppNum]; !ok {
+				recordProblem(notInstalled, bInfo.BackupName, bAppNum)
 			}
 		}
 	}
@@ -158,11 +145,103 @@ func check(steamAppsLibDir, steamBackupsDir string,
 	reportProblems(verbose)
 }
 
+/*---------------- Callback for reporting duplicate manifests ----------------*/
+
+// reportOldManifest is called by ScanSteamLibDir() when it finds a second or
+// later manifest for an app.
+//
+func reportOldManifest(prev, curr *steamfiles.InstalledApp, usingCurr bool) {
+	t := new(strings.Builder)
+	switch len(prev.LibraryFolders) {
+	case 1:
+		fmt.Fprintf(t, "a second manifest")
+	default:
+		fmt.Fprintf(t, "manifest #%d", len(prev.LibraryFolders)+1)
+	}
+	fmt.Fprintf(t, " for app #%d (%q) with ", curr.AppNumber, curr.AppName)
+
+	isDifferent := true
+	if prev.AppName == curr.AppName {
+		if prev.InstallDir == curr.InstallDir {
+			isDifferent = false
+			fmt.Fprintf(t, "the same details")
+		} else {
+			fmt.Fprintf(t, `"installdir" now %q (was %q)`,
+				curr.InstallDir, prev.InstallDir)
+		}
+	} else {
+		if prev.InstallDir == curr.InstallDir {
+			fmt.Fprintf(t, "new name (was %q)", prev.AppName)
+		} else {
+			fmt.Fprintf(t, `new name (was %q), "installdir"`, prev.AppName)
+		}
+	}
+	fmt.Fprintf(t, "\n   in %q\n", curr.LibraryFolders[0]+string(filepath.Separator))
+	for i, path := range prev.LibraryFolders {
+		fmt.Fprintf(t, "%5s: %q\n", fmt.Sprintf("#%d", i+1), path)
+	}
+
+	verb := "Found"
+	if isDifferent {
+		if usingCurr {
+			verb += "and using"
+		} else {
+			verb += "and ignoring"
+		}
+	}
+	fmt.Fprintf(os.Stderr, " %s %s", verb, t.String())
+}
+
+/*---------- Callback for reporting and choosing duplicate backups -----------*/
+
+func handleDupeBackup(appNum AppNum, prev, curr *steamfiles.AppBackup) bool {
+	if len(prev.AppNumbers) > 1 && len(curr.AppNumbers) == 1 {
+		reportBackupChoice(appNum,
+			"single-app backup", curr,
+			fmt.Sprintf("%d-app backup", len(prev.AppNumbers)), prev)
+		return true
+	} else if len(prev.AppNumbers) == 1 && len(curr.AppNumbers) > 1 {
+		reportBackupChoice(appNum,
+			"single-app backup", prev,
+			fmt.Sprintf("%d-app backup", len(curr.AppNumbers)), curr)
+		return false
+	}
+
+	// Discard the one with the earlier ModTime; Keep the latest.
+	ret, d, k := true, prev, curr
+	if d.ModTime.After(k.ModTime) {
+		ret, d, k = false, curr, prev
+	}
+	reportBackupChoice(appNum,
+		d.ModTime.Format("older backup (2006-01-02t15:04:05)"), curr,
+		k.ModTime.Format("newer backup (2006-01-02t15:04:05)"), prev)
+	return ret
+}
+func reportBackupChoice(appNum AppNum,
+	dText string, dInfo *steamfiles.AppBackup, // The one to be discarded
+	kText string, kInfo *steamfiles.AppBackup, // The one to be kept
+) {
+
+	appName, suffix := kInfo.BackupName, "?"
+	if manifestInfo, haveManifest := manifestInfoForAppNum[appNum]; haveManifest {
+		appName, suffix = manifestInfo.AppName, ""
+	}
+	fmt.Fprintf(os.Stderr,
+		(" Found multiple backups for app %d (%q%s):\n" +
+			"\tUsing %s %q,\n" +
+			"\tIgnoring %s %q\n"),
+		appNum, appName, suffix,
+		dText, dInfo.BackupPath,
+		kText, kInfo.BackupPath)
+}
+
+/*=========================== Reporting ‘problems’ ===========================*/
+
 type problemKind byte
 type problemInfo struct {
 	kind      problemKind
 	appName   string
-	appNumber int32
+	appNumber AppNum
 }
 
 const (
@@ -178,7 +257,7 @@ var formatForProblem = map[problemKind]string{
 }
 var problems []problemInfo
 
-func recordProblem(kind problemKind, appName string, appNumber int32) {
+func recordProblem(kind problemKind, appName string, appNumber AppNum) {
 	problems = append(problems,
 		problemInfo{
 			kind:      kind,
@@ -207,30 +286,12 @@ func reportProblems(verbose bool) {
 	// ??? For "problems by category", things would be different.
 }
 
+/*============================ Utility Functions =============================*/
+
 func reportCount(n int, noun string) {
 	if n == 1 {
 		fmt.Printf(" Found one %s\n", noun)
 	} else {
 		fmt.Printf(" Found %d %ss\n", n, noun)
-	}
-}
-
-func dumpMap(what string, m steamfiles.AppInfoForAppNum) {
-	fmt.Println(what)
-
-	keys := make([]int, 0, len(m))
-	for k, _ := range m {
-		keys = append(keys, int(k))
-	}
-	fmt.Printf("  #D# sorting %d keys\n", len(keys))
-	sort.Ints(keys)
-
-	for _, k := range keys {
-		kk := int32(k)
-		v := m[kk]
-		if v.Number != kk {
-			Warn("key=%d but .Number=%d", k, v.Number)
-		}
-		fmt.Printf("%8d %q\n", v.Number, v.Name)
 	}
 }
