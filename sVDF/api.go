@@ -106,7 +106,7 @@ func FromFile(filespec string, expectedTopNames ...string) (*File, error) {
 	return ret, nil
 }
 
-// Lookup() returns the string value, if any, from nested name-value lists in a
+// Lookup(names) returns the string value, if any, from nested name-value lists in a
 // parsed VDF file.
 //
 // (That is, it takes the name of an entry in the top-level NVL, then the name
@@ -114,10 +114,8 @@ func FromFile(filespec string, expectedTopNames ...string) (*File, error) {
 // should correspond to nested NVLs, and the last should correspond to a string
 // value.)
 //
-func (f *File) Lookup(names ...string) (string, error) {
-	if len(names) == 0 {
-		panic("sVDF.File.Lookup(): no names!")
-	}
+func (f *File) Lookup(name string, names ...string) (string, error) {
+	names = append([]string{name}, names...)
 	v := f.TopValue
 	for i := 0; i < len(names); i++ {
 		switch vv := v.(type) {
@@ -151,10 +149,8 @@ func (f *File) Lookup(names ...string) (string, error) {
 
 // HaveString(names) reports whether Lookup(names) would succeed.
 //
-func (f *File) HaveString(names ...string) bool {
-	if len(names) == 0 {
-		panic("sVDF.File.HaveString(): no names!")
-	}
+func (f *File) HaveString(name string, names ...string) bool {
+	names = append([]string{name}, names...)
 	v := f.TopValue
 	for i := 0; i < len(names); i++ {
 		switch vv := v.(type) {
@@ -176,6 +172,77 @@ func (f *File) HaveString(names ...string) bool {
 		return true
 	case NamesValuesList:
 		return false
+	default:
+		panic(fmt.Sprintf("%s = %+#v", filePaths(f.Path, names, true), v))
+	}
+}
+
+// LookupNVL(names) returns the NamesValuesList value, if any, at
+//	file → names[0] → names[1] ... → names[N]
+// in nested name-value lists in a parsed VDF file.
+//
+// (That is, it takes the name of an entry in the top-level NVL, then the name
+// of an entry in that NVL, and so on.  Hence all the names should correspond to
+// nested NVLs.)
+//
+func (f *File) LookupNVL(name string, names ...string) (*NamesValuesList, error) {
+	names = append([]string{name}, names...)
+	v := f.TopValue
+	for i := 0; i < len(names); i++ {
+		switch vv := v.(type) {
+		case string:
+			return nil, &IsStringError{
+				NamePath: names[:i],
+				String:   vv}
+		case NamesValuesList:
+			valForName, ok := vv[names[i]]
+			if !ok {
+				return nil, &UnknownNameError{
+					NamePath: names[:i]}
+			}
+			v = valForName
+		default:
+			panic(fmt.Sprintf("%s = %+#v",
+				filePaths(f.Path, names[:i], true), v))
+		}
+	}
+	switch vv := v.(type) {
+	case string:
+		return nil, &IsStringError{
+			NamePath: names,
+			String:   vv}
+	case NamesValuesList:
+		return &vv, nil
+	default:
+		panic(fmt.Sprintf("%s = %+#v", filePaths(f.Path, names, true), v))
+	}
+}
+
+// HaveNVL(names) reports whether LookupNVL(names) would succeed.
+//
+func (f *File) HaveNVL(name string, names ...string) bool {
+	names = append([]string{name}, names...)
+	v := f.TopValue
+	for i := 0; i < len(names); i++ {
+		switch vv := v.(type) {
+		case string:
+			return false
+		case NamesValuesList:
+			valForName, ok := vv[names[i]]
+			if !ok {
+				return false
+			}
+			v = valForName
+		default:
+			panic(fmt.Sprintf("%s = %+#v",
+				filePaths(f.Path, names[:i], true), v))
+		}
+	}
+	switch v.(type) {
+	case string:
+		return false
+	case NamesValuesList:
+		return true
 	default:
 		panic(fmt.Sprintf("%s = %+#v", filePaths(f.Path, names, true), v))
 	}
