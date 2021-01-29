@@ -14,39 +14,21 @@ import (
 
 type AppNum = steamfiles.AppNum
 
-const (
-	defaultAppsLibDir = "/Store/X/LinuxGames/Steam/SteamApps/steamapps/"
-	defaultBackupsDir = "/C/++Steam-Backups-for-Linux/"
-	//
-	appsInstallRelPath = "common"
-	//
-	// Maybe one day ...???
-	steamLibsList = "~/.steam/debian-installation/steamapps/libraryfolders.vdf"
-	// Hmmm ....
-	//  steamRoot, err := filepath.EvalSymlinks("$HOME/.steam/root")
-	//  steamHome := filepath.Join(steamRoot, "steamapps")
-	//  libDirsList := []string{steamHome}
-	//  libFoldersSpec :=
-	//	ioutil.ReadFile(filepath.Join(steamHome, "libraryfolders.vdf"))
-	//  libPaths := []string{
-)
-
 /*=================================== CLI ====================================*/
 
-const VERSION = "0.3"
+const VERSION = "0.4"
 
 const USAGEf = `Usage:
-  %s [options]
+  %s [options] [<Steam-library-folder> ...]
   %s (-h | --help  |  --version)
 
-Check for missing and outdated Steam backups.
+Check for missing and outdated Steam backups. If no Steam library folders are
+specified as arguments, use those for the current user’s Steam installation.
 
 Options:
-  -a=<lib-dir>      Specify a steam library directory containing appmanifest_#.acf files
-                    [default: %s]
-  -b=<backups-dir>  Specify the directory to search for backups
-                    [default: %s]
+  -b <backups-dir>  Scan this directory to search for backups instead of Steam’s default
   -r                Report backups with no appmanifest_<app#>.acf in <lib-dir>
+  -s                Skip apps installed in user’s home Steam Library Folder
   -v                Output progress reports
 `
 
@@ -63,56 +45,141 @@ Options:
 func main() {
 	progName := filepath.Base(os.Args[0])
 	usageText := fmt.Sprintf(USAGEf,
-		progName, progName, defaultAppsLibDir, defaultBackupsDir)
+		progName, progName)
 	parsedArgs, err :=
 		docopt.ParseArgs(usageText, os.Args[1:], VERSION)
 	DieIf2(err, "BUG", "docopt failed: %s", err)
 
-	steamAppsLibDir := filepath.Clean(getArg("-a", parsedArgs))
-	steamBackupsDir := filepath.Clean(getArg("-b", parsedArgs))
 	reportBackupsNotInLib := optSpecified("-r", parsedArgs)
 	verbose := optSpecified("-v", parsedArgs)
+	skipHomeSLF := optSpecified("-s", parsedArgs)
 
-	check(steamAppsLibDir, steamBackupsDir, reportBackupsNotInLib, verbose)
+	backupsDir := filepath.Clean(getArg("-b", parsedArgs))
+	steamLibDirs := getSteamLibDirs("<Steam-library-folder>", parsedArgs, &backupsDir)
+	p, err := filepath.EvalSymlinks(backupsDir)
+	DieIf(err, "cannot follow symlinks in %q: %s", backupsDir, err)
+	if p != backupsDir {
+		WriteMessage("", "backups directory %q symlinks to %q",
+			backupsDir, p)
+		backupsDir = p
+	}
+
+	scanSteamLibraryDirs(steamLibDirs, skipHomeSLF, verbose)
+
+	check(backupsDir, reportBackupsNotInLib, verbose)
 }
 
 func optSpecified(key string, parsedArgs docopt.Opts) bool {
 	val, err := parsedArgs.Bool(key)
-	if err != nil {
-		Die2("usage", "no key %q in docopt result %+#v", key, parsedArgs)
-	}
-	return val
-}
-
-func getArg(key string, parsedArgs docopt.Opts) string {
-	val, err := parsedArgs.String(key)
 	if err != nil {
 		Die2("BUG", "no key %q in docopt result %+#v", key, parsedArgs)
 	}
 	return val
 }
 
+func getArg(key string, parsedArgs docopt.Opts) string {
+	argsItem, haveItem := parsedArgs[key]
+	if !haveItem {
+		Die2("BUG", "no key %q in docopt result %+#v", key, parsedArgs)
+	}
+	if argsItem == nil {
+		return ""
+	}
+	string, haveString := argsItem.(string)
+	if !haveString {
+		Die2("BUG", "weird value %#v for %q in docopt result", argsItem, key)
+	}
+	return string
+}
+
+func getSteamLibDirs(key string, parsedArgs docopt.Opts, backupsDir *string) []string {
+	SLFargs := make([]string, 0, len(os.Args))
+	argsItem, haveItem := parsedArgs[key]
+	if !haveItem {
+		Die2("BUG", "no key %q in docopt result %+#v", key, parsedArgs)
+	}
+	if list, ok := argsItem.([]string); ok {
+		SLFargs = list
+	} else {
+		Die2("BUG", "docopt[%q] == %#v", key, argsItem)
+	}
+
+	SteamDir, SLDsConfig, err := steamfiles.FindSteamLibraryDirs(warnBadSLF)
+	DieIf(err, "")
+
+	if *backupsDir == "" || *backupsDir == "." {
+		configBackupsDir, err := steamfiles.DirectoryExists(SteamDir, "Backups")
+		DieIf(err, "cannot find default backups directory: %s", err)
+		*backupsDir = configBackupsDir
+	}
+
+	if len(SLFargs) == 0 {
+		return SLDsConfig
+	}
+
+	// We expect/allow users to specifiy “Steam Library Folders” (the ones
+	// which contain subdirectories named "steamapps"), but we return the
+	// pathnames of those "steamapps" directories (‘Steam Library
+	// Directories’).
+	steamLibDirs := make([]string, 0, len(SLFargs))
+	for _, arg := range SLFargs {
+		if filepath.Base(arg) != "steamapps" {
+			subdir, err :=
+				steamfiles.DirectoryExists(arg, "steamapps")
+			if err != nil {
+				Warn("cannot scan %q: %s", arg, err)
+			} else {
+				arg = subdir
+			}
+		}
+		steamLibDirs = append(steamLibDirs, arg)
+	}
+
+	return steamLibDirs
+}
+
+func warnBadSLF(slfPath string, e error) {
+	Warn("invalid Steam Library Folder %q: %s", slfPath, e)
+}
+
 //
-/*============================== Main function ===============================*/
+/*============ Scanning Steam Library Folders for installed apps =============*/
 //
 
 var manifestInfoForAppNum steamfiles.InstalledAppForAppNum
 
-func check(steamAppsLibDir, steamBackupsDir string, reportUninstalled, verbose bool) {
+func scanSteamLibraryDirs(dirList []string, skipHomeSLF, verbose bool) {
 	manifestInfoForAppNum = make(steamfiles.InstalledAppForAppNum)
-	err := steamfiles.ScanSteamLibDir(
-		steamAppsLibDir, manifestInfoForAppNum, reportOldManifest)
-	DieIf(err, "")
-	if verbose {
-		reportCount(len(manifestInfoForAppNum), "valid appmanifest_$N.acf file")
-	}
 
+	nMappedApps := 0
+	if skipHomeSLF {
+		dirList = dirList[1:]
+	}
+	for _, dirPath := range dirList {
+		err := steamfiles.ScanSteamLibDir(
+			dirPath, manifestInfoForAppNum, reportOldManifest)
+		DieIf(err, "")
+		if verbose {
+			nAdded := len(manifestInfoForAppNum) - nMappedApps
+			reportCount(nAdded, "valid appmanifest_$N.acf file", dirPath)
+		}
+		nMappedApps = len(manifestInfoForAppNum)
+	}
+	if verbose && len(dirList) > 1 {
+		reportCount(nMappedApps, "valid appmanifest_$N.acf file",
+			fmt.Sprintf("in %d directories", len(dirList)))
+	}
+}
+
+/*======================= Scanning a backup directory ========================*/
+
+func check(steamBackupsDir string, reportUninstalled, verbose bool) {
 	backupInfoForAppNum := make(steamfiles.AppBackupForAppNum)
-	err = steamfiles.ScanBackupsDir(
+	err := steamfiles.ScanBackupsDir(
 		steamBackupsDir, backupInfoForAppNum, handleDupeBackup)
 	DieIf(err, "")
 	if verbose {
-		reportCount(len(backupInfoForAppNum), "Steam backup")
+		reportCount(len(backupInfoForAppNum), "Steam backup", steamBackupsDir)
 	}
 
 	for mAppNum, mInfo := range manifestInfoForAppNum {
@@ -271,7 +338,7 @@ func reportProblems(verbose bool) {
 		}
 		return
 	}
-	reportCount(len(problems), "problem")
+	reportCount(len(problems), "problem", "")
 
 	// (???) For "problems sorted by app name" mode:
 	sort.Slice(problems,
@@ -288,10 +355,15 @@ func reportProblems(verbose bool) {
 
 /*============================ Utility Functions =============================*/
 
-func reportCount(n int, noun string) {
+func reportCount(n int, noun, where string) {
+	if strings.HasPrefix(where, "in ") {
+		where = " " + where
+	} else if where != "" {
+		where = fmt.Sprintf(" in %q", where)
+	}
 	if n == 1 {
-		fmt.Printf(" Found one %s\n", noun)
+		fmt.Printf(" Found one %s%s\n", noun, where)
 	} else {
-		fmt.Printf(" Found %d %ss\n", n, noun)
+		fmt.Printf(" Found %d %ss%s\n", n, noun, where)
 	}
 }

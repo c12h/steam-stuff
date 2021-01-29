@@ -1,6 +1,6 @@
 github.com/c12h/errs v0.0.0-20210124123617-2034366c58f2 h1:YkTLw+llQ3/GDBOLwmKHWcPgf/k9esFijG9j4fNK4ts=
 github.com/c12h/errs v0.0.0-20210124123617-2034366c58f2/go.mod h1:gx75h0SDYceUl91ghxBUr4S2PjmhxiZXGx2xLisKdL4=
-github.com/c12h/steam-stuff v0.0.0-20210126020651-b65d6dd712f1 h1:7bHEQ8rFmlysEBfAadORPNLDaGtZG9mCjXd87NeGexc=
-github.com/c12h/steam-stuff/sVDF v0.0.0-20210126020651-b65d6dd712f1 h1:LDEmTMCANowhKu7ucOmPhTNtre1lXP5PZT2KSrb05zc=
-github.com/c12h/steam-stuff/sVDF v0.0.0-20210126020651-b65d6dd712f1/go.mod h1:IqZjSFpEcANrnZewPaeiyyv4MyiAr+oU2V2t8s9JL04=
+github.com/c12h/steam-stuff v0.0.0-20210129084345-3b2a2d55e86f h1:eE2/liXoLJjt7Ba7OqrSgF/jdb8xFoX8zyqoWSnVZxw=
+github.com/c12h/steam-stuff/sVDF v0.0.0-20210129084345-3b2a2d55e86f h1:0+XdDl1NfpDAFYBUDn7q8I5wuJx0qhmG1fkiHp918/U=
+github.com/c12h/steam-stuff/sVDF v0.0.0-20210129084345-3b2a2d55e86f/go.mod h1:IqZjSFpEcANrnZewPaeiyyv4MyiAr+oU2V2t8s9JL04=
 github.com/docopt/docopt-go v0.0.0-20180111231733-ee0de3bc6815/go.mod h1:WwZ+bS3ebgob9U8Nd0kOddGdZWjyMGR8Wziv+TBNwSE=

@@ -256,13 +256,9 @@ func scanAppsLibDir(path string) (AppInfoForAppNum, error) {
 }
 
 func parseManifest(mfPath string) (*AppInfo, error) {
-	mfInfo, err := sVDF.FromFile(mfPath)
+	mfInfo, err := sVDF.FromFile(mfPath, "AppState")
 	if err != nil {
-		return nil, err
-	}
-	if mfInfo.TopName != "AppState" {
-		return nil, badFile(mfPath, mfInfo.TopName,
-			`content has name %q, not "AppState"`, mfInfo.TopName)
+		return nil, cannot(err, "use", mfPath)
 	}
 
 	idText, err := mfInfo.Lookup("appid")
@@ -335,15 +331,9 @@ func scanBackupsDir(backupsDirPath string) (AppInfoForAppNum, error) {
 			} 
 		}
 
-		skuInfo, err := sVDF.FromFile(skuPath)
+		skuInfo, err := sVDF.FromFile(skuPath, "sku", "SKU")
 		if err != nil {
 			return nil, err
-		}
-
-		if skuInfo.TopName != "sku" && skuInfo.TopName != "SKU" {
-			return nil, badFile(skuPath, skuInfo.TopName,
-				`content has name %q, not "sku" or "SKU"`,
-				skuInfo.TopName)
 		}
 
 		/// ??? WHAT HAPPENS if multiple games backed up together ???
