@@ -1,7 +1,6 @@
 package steamfiles
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -17,7 +16,7 @@ import (
 // consists of a directory ...???
 //
 type AppBackup struct {
-	AppNumbers []AppNum   // Which apps are saved in this backup
+	AppNumbers []AppNum  // Which apps are saved in this backup
 	BackupName string    // The "name" field from the backup's sku.sis file
 	BackupPath string    // The pathname of the backup directory
 	ModTime    time.Time // When the sku.sis file was last modified
@@ -102,16 +101,11 @@ func ScanBackupsDir(
 				os.ErrNotExist)
 		}
 
-		skuInfo, err := sVDF.FromFile(skuPath)
+		skuInfo, err := sVDF.FromFile(skuPath, "sku", "SKU")
 		if err != nil {
 			return err
 		}
 
-		if skuInfo.TopName != "sku" && skuInfo.TopName != "SKU" {
-			return fileError(skuPath, skuInfo.TopName,
-				`content has name %q, not "sku" or "SKU"`,
-				skuInfo.TopName)
-		}
 		backupName, err := skuInfo.Lookup("name")
 		if err != nil {
 			return cannot("get app name from", "", skuPath, err)
@@ -132,7 +126,7 @@ func ScanBackupsDir(
 			}
 			appNumText, err := skuInfo.Lookup(appListKey, indexKey)
 			if err != nil {
-				panic(fmt.Sprintf("???"))
+				panic(err.Error())
 			}
 			appNum, err := parseAppNum(appNumText, skuPath)
 			if err != nil {

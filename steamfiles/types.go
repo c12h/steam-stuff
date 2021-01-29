@@ -1,19 +1,3 @@
-// Package steamfiles deals with locally-installed Steam apps and their backups.
-//
-// It allows callers to find and examine installed Steam apps and backups of
-// Steam apps in local storage.
-//
-// Steam can have more than one "Steam library folder".  Each such folder is
-// rooted at a directory named "steamapps" (or perhaps "SteamApps"?).  That
-// directory contains a text file named appmanifest_<N>.acf for each app
-// installed there, where <N> is the app’s numeric (decimal) ID.  These files
-// are in the Valve Data Format (specifically in what I call the "simple VDF" in
-// which all keys and final values are double-quoted strings).
-//
-// Steam backups are stored as a directory whose name reflects the apps in that
-// backup.  (You can backup multiple apps together.)  A backup is divided into
-// one or more subdirectories named "Disk_1", "Disk_2", etc. ...???... sku.sis
-//
 package steamfiles // import "github.com/c12h/steam-stuff/steamfiles"
 
 import (

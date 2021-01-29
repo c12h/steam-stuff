@@ -38,9 +38,8 @@ type InstalledAppForAppNum map[AppNum]*InstalledApp
 // An OldManifestReporter is a callback for reporting multiple manifests for the
 // same app.
 //
-// If ScanSteamLibDir() finds more than one manifest for an app (eg., if
-// multiple Steam installations are scanned) and the manifests have different
-// AppName or InstallDir values, it uses the most recently modified file, and
+// If ScanSteamLibDir() finds more than one manifest for an app (eg., if a
+// caller scans multiple Steam), it uses the most recently modified file, and
 // calls the OldManifestReporter, passing in the previous InstalledApp value,
 // the value just extracted from the manifest and a flag saying whether it will
 // use the latter.
@@ -49,15 +48,17 @@ type InstalledAppForAppNum map[AppNum]*InstalledApp
 // the manifest was found earlier, and curr.LibraryFolders will specify the
 // directory in which a new manifest was just found.
 //
-// Sample code:
+// The callback probably should report whether the AppName or InstallDir fields
+// of the two InstalledApp values are different.  Sample code:
 //	sameDetails := prev.AppName == curr.AppName && prev.InstallDir == curr.InstallDir
 //
 type OldManifestReporter func(prev, curr *InstalledApp, usingCurr bool)
 
 // ScanSteamLibDir finds and parses all the appmanifest_<app#>.acf files in a
-// "steam library folder", and records them in a caller-supplied map.
+// ‘Steam library directory’, and records them in a caller-supplied map.
 //
-// If handleDiff is nil, ScanSteamLibDir will simply ignore outdated manifests.
+// If handleDiff is nil, ScanSteamLibDir will handle duplicate manifests by
+// silently using the last one found.
 //
 func ScanSteamLibDir(
 	libPath string, theMap map[AppNum]*InstalledApp, handleDiff OldManifestReporter,
@@ -123,9 +124,10 @@ func ScanSteamLibDir(
 			libPath, true, " — not a Steam library folder?", nil)
 	}
 	return nil
-
 }
 
+// ignoreDiff is the default OldManifestReporter.
+//
 func ignoreDiff(prev, curr *InstalledApp, usingCurr bool) {}
 
 var reManifestFile = regexp.MustCompile(`^appmanifest_(\d+)\.acf$`)
@@ -134,13 +136,9 @@ var reManifestFile = regexp.MustCompile(`^appmanifest_(\d+)\.acf$`)
 // appmanifest_<app#>.acf file.
 //
 func parseManifest(mfPath string) (*InstalledApp, error) {
-	mfInfo, err := sVDF.FromFile(mfPath)
+	mfInfo, err := sVDF.FromFile(mfPath, "AppState")
 	if err != nil {
 		return nil, err
-	}
-	if mfInfo.TopName != "AppState" {
-		return nil, fileError(mfPath, mfInfo.TopName,
-			`content has name %q, not "AppState"`, mfInfo.TopName)
 	}
 
 	idText, err := mfInfo.Lookup("appid")
@@ -176,16 +174,16 @@ func parseManifest(mfPath string) (*InstalledApp, error) {
 // written).
 //
 // The files for an installed app can be found in a directory tree rooted at
-//   <steam-library-folder>/common/<installdir>/
+//   <steam-library-folder>/steamapps/common/<installdir>/
 // where the <installdir> comes from the apps manifest file.
 //
 // This function can cope with incorrect casing of the appInstallDir value on
-// case-sensitive file systems.  I own "X3: Albion Prelude", a DLC, which has
+// case-sensitive file systems.  For example "X3: Albion Prelude", a DLC, has
 //	"installdir"	"x3 terran conflict"
 // in its manifest (appmanifest_201310.acf) instead of "X3 Terran Conflict".
-// (Steam would catch this problem in a base game, but apparently not in DLCs.)
-// It turns out we can handle this on Linux with a few extra lines of code and a
-// millisecond or so, so we do that.
+// (This problem would be detected and fixed in a base game, but apparently not
+// in DLCs.)  It turns out we can handle this on Linux with a few dozen lines of
+// code and a millisecond or so, so we do that.
 //
 func AppNewerThan(steamLibDir, appInstallDir string, skuTime time.Time) (bool, error) {
 	installsDir := filepath.Join(steamLibDir, "common")
@@ -252,12 +250,13 @@ func isRegFile(nodeInfo os.FileInfo) bool {
 	return nodeInfo.Mode()&os.ModeType == 0
 }
 
-// On Linux, we cache the app install directory names in each
-// …/steamapps/common/ directory we encounter as a map from directory name to a
-// map from monocase(appInstallDir) to appInstallDir.
+// On Linux, we cache the entry names in each "<SLF>/steamapps/common" directory
+// we encounter in namesCacheForDir, which maps each "…/common" directory path
+// to a second-level map from monocase(entryName) to entryName.
 //
 // On Windows and Mac, findIgnoringCase() never gets called (unless something is
-// wrong with the files in …/steamapps/), so this
+// badly amiss with the files in …/steamapps/), so this variable never becomes
+// non-nil.
 //
 var namesCacheForDir map[string]map[string]string
 
@@ -289,6 +288,8 @@ func findIgnoringCase(dirPath, wrongName string) (string, error) {
 	return filepath.Join(dirPath, mappedName), nil
 }
 
+// scanDirIgnoringCase is the recursive directory scanner for findIgnoringCase.
+//
 func scanDirIgnoringCase(dirPath string) (map[string]string, error) {
 	ret := make(map[string]string)
 
