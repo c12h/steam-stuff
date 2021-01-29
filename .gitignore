@@ -3,6 +3,13 @@
 
 # Working notes
 +*.txt
+
+# Test stuff
+test*
+Test*
+test*/**
+Test*/**
+
 # Binaries for programs and plugins
 *.so
 *.dylib

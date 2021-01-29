@@ -8,6 +8,13 @@ import (
 	"github.com/c12h/steam-stuff/sVDF"
 )
 
+// FindSteamHome returns the pathname of the directory where Steam is installed
+// for the current user (or returns an error).
+//
+func FindSteamHome() (string, error) {
+	return findSteamHome()
+}
+
 /*--------------------------- FindSteamLibraryDirs ---------------------------*/
 
 // A BadSteamLibraryDirReporter is a callback that FindSteamLibraryDirs can use

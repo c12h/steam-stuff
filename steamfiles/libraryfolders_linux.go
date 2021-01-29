@@ -9,10 +9,13 @@ import (
 var notFoundErr = fmt.Errorf("no such entry")
 var notADirErr = syscall.ENOTDIR
 
-// FindSteamHome returns the pathname of the directory where Steam is installed
-// for the current user (or returns an error).
+// findSteamHome is the system-dependent function that FindSteamHome is a
+// wrapper for.
 //
-func FindSteamHome() (string, error) {
+// It returns the pathname of the directory where Steam is installed for the
+// current user (or returns an error).
+//
+func findSteamHome() (string, error) {
 	// First, find the user’s home directory.
 	path, err := os.UserHomeDir()
 	if err != nil {
