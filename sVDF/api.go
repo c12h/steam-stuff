@@ -61,9 +61,12 @@ type File struct {
 }
 
 // FromFile() opens, reads and parses a ‘simple VDF’ file, returning a (pointer
-// to a)sVDF.File or an error.
+// to a) sVDF.File or an error.
 //
-func FromFile(filespec string) (*File, error) {
+// If any expected top names are specified and the .TopName is not one of those strings,
+// FromFile returns an error.
+//
+func FromFile(filespec string, expectedTopNames ...string) (*File, error) {
 	fh, err := os.Open(filespec)
 	if err != nil {
 		return nil, cannot(err, "open", filespec)
@@ -80,6 +83,25 @@ func FromFile(filespec string) (*File, error) {
 	err = parseSimpleVDF(fh, ret)
 	if err != nil {
 		return nil, err
+	}
+	if len(expectedTopNames) > 0 {
+		TopNameIsWrong := true
+		for _, etn := range expectedTopNames {
+			if ret.TopName == etn {
+				TopNameIsWrong = false
+				break
+			}
+		}
+		if TopNameIsWrong {
+			expected := fmt.Sprintf("%q", expectedTopNames[0])
+			for _, etn := range expectedTopNames[1:] {
+				expected += fmt.Sprintf(" or %q", etn)
+			}
+			return nil, &WrongTopNameError{
+				Path:          filespec,
+				ActualTopName: ret.TopName,
+				Expected:      expected}
+		}
 	}
 	return ret, nil
 }
@@ -172,6 +194,8 @@ func filePaths(filespec string, names []string, fullFilePath bool) string {
 	return fmt.Sprintf("file %q %s", filespec, namesPath)
 }
 
+/*-------------------------- Errors from .Lookup() ---------------------------*/
+
 type IsStringError struct {
 	NamePath []string
 	String   string
@@ -216,6 +240,8 @@ func namesPath(names []string) string {
 	return text[len("→"):]
 }
 
+/*------------------------------- CannotError --------------------------------*/
+
 type CannotError struct {
 	Verb      string
 	Noun      string
@@ -244,22 +270,15 @@ func (e *CannotError) Unwrap() error {
 	return e.BaseErr
 }
 
-//========================= Doodling for a more general API
-//
-// type File interface {
-// 	Path() string
-// 	ModTime() time.Time
-// 	Size() int
-// 	Format() Format
-// 	TopName() string
-// 	TopValue() NamesValuesList
-// }
-//
-// type Format byte
-//
-// const (
-// 	_ = Format(iota)
-// 	StringyText
-// 	// GeneralText
-// 	// Binary
-// )
+/*---------------------------- WrongTopNameError -----------------------------*/
+
+type WrongTopNameError struct {
+	Path          string // Which file has this problem
+	ActualTopName string // The actual top name
+	Expected      string // What was expected: "E1"[ or "E2" [...]]
+}
+
+func (e *WrongTopNameError) Error() string {
+	return fmt.Sprintf(`line 1 of %q contains %q instead of %q`,
+		e.Path, e.ActualTopName, e.Expected)
+}
