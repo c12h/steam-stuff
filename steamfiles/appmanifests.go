@@ -24,7 +24,7 @@ import (
 // and ensures that .LibraryFolders[0] is the directory holding that file.
 //
 type InstalledApp struct {
-	AppNumber      AppNum     // The app’s identifier
+	AppNumber      AppNum    // The app’s identifier
 	AppName        string    // The app’s name
 	LibraryFolders []string  // Which Steam library folders the app was found in
 	InstallDir     string    // Its files go in/under <LibraryDir>/common/<InstallDir>
@@ -38,11 +38,11 @@ type InstalledAppForAppNum map[AppNum]*InstalledApp
 // An OldManifestReporter is a callback for reporting multiple manifests for the
 // same app.
 //
-// If ScanSteamLibDir() finds more than one manifest for an app (eg., if a
-// caller scans multiple Steam), it uses the most recently modified file, and
-// calls the OldManifestReporter, passing in the previous InstalledApp value,
-// the value just extracted from the manifest and a flag saying whether it will
-// use the latter.
+// If ScanSteamLibDir() finds more than one manifest for an app (perhaps by
+// being used on multiple Steam installations), it uses the most recently
+// modified file, and calls the OldManifestReporter, passing in the previous
+// InstalledApp value, the value just extracted from the manifest and a flag
+// saying whether it will use the latter.
 //
 // When it is called, prev.LibraryFolders will list the directory(ies) in which
 // the manifest was found earlier, and curr.LibraryFolders will specify the
@@ -175,15 +175,20 @@ func parseManifest(mfPath string) (*InstalledApp, error) {
 //
 // The files for an installed app can be found in a directory tree rooted at
 //   <steam-library-folder>/steamapps/common/<installdir>/
+// or (at least for app #492740: "Stellaris: Original Game Soundtrack")
+//   <steam-library-folder>/steamapps/music/<installdir>/
 // where the <installdir> comes from the apps manifest file.
+//
+//	NOTE: I have not found any way to tell which apps use …/music instead of
+//	      …/common, so I try one then the other. Bah.
 //
 // This function can cope with incorrect casing of the appInstallDir value on
 // case-sensitive file systems.  For example "X3: Albion Prelude", a DLC, has
 //	"installdir"	"x3 terran conflict"
 // in its manifest (appmanifest_201310.acf) instead of "X3 Terran Conflict".
-// (This problem would be detected and fixed in a base game, but apparently not
-// in DLCs.)  It turns out we can handle this on Linux with a few dozen lines of
-// code and a millisecond or so, so we do that.
+// (This problem would surely be detected and fixed in a base game, but
+// apparently not in DLCs.)  It turns out we can handle this on Linux with a few
+// dozen lines of code and a millisecond or so, so we do that.
 //
 func AppNewerThan(steamLibDir, appInstallDir string, skuTime time.Time) (bool, error) {
 	installsDir := filepath.Join(steamLibDir, "common")
@@ -191,6 +196,14 @@ func AppNewerThan(steamLibDir, appInstallDir string, skuTime time.Time) (bool, e
 	_, err := os.Lstat(appDir)
 	if err != nil && os.IsNotExist(err) {
 		appDir, err = findIgnoringCase(installsDir, appInstallDir)
+		if err != nil {
+			appMusicDir := filepath.Join(steamLibDir, "music")
+			appDir = filepath.Join(appMusicDir, appInstallDir)
+			_, err := os.Lstat(appDir)
+			if err != nil && os.IsNotExist(err) {
+				appDir, err = findIgnoringCase(appMusicDir, appInstallDir)
+			}
+		}
 		if err != nil {
 			return false, err
 		}
@@ -224,7 +237,6 @@ func anyFileNewerThan(dirPath string, t time.Time) (bool, error) {
 				//D//	node.ModTime().Format("2006-01-02t15:04:05"),
 				//D//	t.Format("2006-01-02t15:04:05"))
 				return true, nil
-
 			}
 		}
 	}
@@ -255,8 +267,8 @@ func isRegFile(nodeInfo os.FileInfo) bool {
 // to a second-level map from monocase(entryName) to entryName.
 //
 // On Windows and Mac, findIgnoringCase() never gets called (unless something is
-// badly amiss with the files in …/steamapps/), so this variable never becomes
-// non-nil.
+// badly amiss with the files in …/steamapps/ or …/music), so this variable
+// never becomes non-nil.
 //
 var namesCacheForDir map[string]map[string]string
 
